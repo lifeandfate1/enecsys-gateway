@@ -1,6 +1,5 @@
 name: "Enecsys Gateway Listener"
-version: "1.0.0"
-slug: "enecsys_gateway"
+version: "1.0.1"
 description: "Emulates the Enecsys Cloud Server to decode solar data locally."
 url: "https://github.com/lifeandfate1/enecsys-gateway"
 arch:
@@ -18,4 +17,3 @@ options:
   mqtt_host: "core-mosquitto"
 schema:
   mqtt_host: str
-image: "python:3.9-slim"
