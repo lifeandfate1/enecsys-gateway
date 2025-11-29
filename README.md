@@ -92,6 +92,9 @@ mqtt:
       unit_of_measurement: "°C"
       value_template: "{{ value_json.temperature_c }}"
       device_class: temperature
+
+---
+
 🐛 Troubleshooting
 "I see raw data in the logs, but the numbers (Watts/Volts) are crazy." The binary format of Enecsys inverters varies slightly by firmware generation. This Add-on uses the standard "Gen 1" bit-mapping.
 
