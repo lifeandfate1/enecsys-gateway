@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Setup Enecsys Gateway",
+        "description": "Enter the port your Enecsys Gateway is sending data to.",
+        "data": {
+          "port": "Listening Port (Default: 5040)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to bind to port."
+    },
+    "abort": {
+      "already_configured": "This gateway is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure Enecsys",
+        "data": {
+          "port": "Listening Port"
+        }
+      }
+    }
+  }
+}
