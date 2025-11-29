@@ -1,0 +1,10 @@
+{
+  "domain": "enecsys_gateway",
+  "name": "Enecsys Gateway",
+  "version": "1.0.0",
+  "documentation": "https://github.com/lifeandfate1/enecsys-gateway",
+  "dependencies": [],
+  "codeowners": ["@lifeandfate1"],
+  "requirements": [],
+  "iot_class": "local_push"
+}
