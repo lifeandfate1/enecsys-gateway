@@ -11,11 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # 1. Check HACS requirements (Ignore brands because we are custom)
       - name: HACS Validation
         uses: hacs/action@main
         with:
           category: integration
           ignore: brands
 
+      # 2. Check Home Assistant Structure (Manifest, Config Flow, etc.)
       - name: Hassfest Validation
         uses: home-assistant/actions/hassfest@master
+
+      # 3. Check Python Code Quality (The 2025 Standard)
+      - name: Ruff Linter
+        uses: chartboost/ruff-action@v1
+        with:
+          src: "./custom_components/enecsys_gateway"
