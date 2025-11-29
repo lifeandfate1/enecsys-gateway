@@ -32,7 +32,7 @@ This Home Assistant Add-on emulates the original (now dead) Enecsys cloud server
 3.  Click the **three dots** in the top-right corner and select **Repositories**.
 4.  Add the URL of this GitHub repository:
     ```text
-    [https://github.com/YOUR_GITHUB_USERNAME/enecsys-gateway](https://github.com/YOUR_GITHUB_USERNAME/enecsys-gateway)
+    [https://github.com/lifeandfate1/enecsys-gateway](https://github.com/lifeandfate1/enecsys-gateway)
     ```
 5.  Click **Add**.
 
