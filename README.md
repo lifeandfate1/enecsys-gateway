@@ -25,9 +25,9 @@ This integration runs a lightweight TCP server inside Home Assistant that emulat
 
 1.  Add the following line to your `configuration.yaml` file to enable the integration:
 
-@@@yaml
+```yaml
 enecsys_gateway:
-@@@
+```
 
 2.  **Restart Home Assistant again** to start the TCP listener.
 
