@@ -2,8 +2,7 @@ import asyncio
 import logging
 import base64
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 DOMAIN = "enecsys_gateway"
@@ -20,25 +19,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # --- THE TCP SERVER LOGIC ---
     async def handle_connection(reader, writer):
         addr = writer.get_extra_info('peername')
-        _LOGGER.debug(f"New connection from {addr}")
+        _LOGGER.debug("New connection from %s", addr)
         try:
             while True:
                 data = await reader.read(1024)
-                if not data: break
+                if not data:
+                    break
                 
                 message = data.decode('utf-8', errors='ignore').strip()
                 for line in message.split('\r'):
                     if line.startswith("WS="):
                         process_data(hass, line)
         except Exception as e:
-            _LOGGER.error(f"Connection error: {e}")
+            _LOGGER.error("Connection error: %s", e)
         finally:
             writer.close()
 
     def process_data(hass, data_str):
         try:
             parts = data_str.split("=")
-            if len(parts) < 2: return
+            if len(parts) < 2:
+                return
             b64_payload = parts[1]
             device_id = parts[2] if len(parts) > 2 else "Unknown"
             
@@ -59,12 +60,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             }
             async_dispatcher_send(hass, f"{DOMAIN}_update", payload)
         except Exception as e:
-            _LOGGER.error(f"Decode error: {e}")
+            _LOGGER.error("Decode error: %s", e)
 
     # Start Server
     try:
         server = await asyncio.start_server(handle_connection, '0.0.0.0', port)
-        _LOGGER.info(f"Enecsys Server listening on port {port}")
+        _LOGGER.info("Enecsys Server listening on port %s", port)
         
         # Store server in hass.data to retrieve it later for unloading
         hass.data[DOMAIN][entry.entry_id] = server
@@ -73,7 +74,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         asyncio.create_task(server.serve_forever())
 
     except OSError as err:
-        _LOGGER.error(f"Failed to start server on port {port}: {err}")
+        _LOGGER.error("Failed to start server on port %s: %s", port, err)
         return False
 
     # Load Sensors
