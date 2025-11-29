@@ -1,6 +1,7 @@
 {
-  "name": "Enecsys Gateway Integration",
+  "name": "Enecsys Gateway",
   "render_readme": true,
   "content_in_root": false,
-  "homeassistant": "2023.1.0"
+  "homeassistant": "2025.1.0",
+  "country": "US"
 }

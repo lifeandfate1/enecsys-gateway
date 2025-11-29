@@ -5,7 +5,7 @@
         "title": "Setup Enecsys Gateway",
         "description": "Enter the port your Enecsys Gateway is sending data to.",
         "data": {
-          "port": "Listening Port (Default: 5040)"
+          "port": "Listening Port"
         }
       }
     },
