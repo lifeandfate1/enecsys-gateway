@@ -1,8 +1,11 @@
 import logging
 from homeassistant.core import callback
-from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorEntity,  # <--- THIS WAS MISSING
+    SensorDeviceClass, 
+    SensorStateClass
+)
 from homeassistant.const import UnitOfPower, UnitOfElectricPotential, UnitOfTemperature
 
 DOMAIN = "enecsys_gateway"
@@ -15,8 +18,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     @callback
     def handle_update(data):
         device_id = data["device_id"]
+        # Use a composite key so we don't duplicate sensors for the same device
+        # (Though device_id should be unique enough)
         if device_id not in known_devices:
-            _LOGGER.warning("CREATING SENSORS for New Inverter: %s", device_id)
+            _LOGGER.info("CREATING SENSORS for New Inverter: %s", device_id)
             known_devices.add(device_id)
             new_sensors = [
                 EnecsysSensor(device_id, "Power", UnitOfPower.WATT, SensorDeviceClass.POWER, "dc_power"),
@@ -28,19 +33,19 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     # Listen for updates from __init__.py
     async_dispatcher_connect(hass, f"{DOMAIN}_update", handle_update)
 
-class EnecsysSensor(Entity):
+class EnecsysSensor(SensorEntity): # <--- CHANGED FROM Entity TO SensorEntity
     """Representation of an Enecsys Sensor."""
 
     def __init__(self, device_id, name_suffix, unit, device_class, data_key):
         """Initialize the sensor."""
         self._device_id = device_id
-        # Use a clean, readable name
         self._attr_name = f"Enecsys {device_id} {name_suffix}"
         self._attr_unique_id = f"enecsys_{device_id}_{data_key}"
-        self._unit = unit
-        self._device_class = device_class
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._data_key = data_key
-        self._state = None
+        self._attr_native_value = None
         self._attr_available = True
 
     async def async_added_to_hass(self):
@@ -54,32 +59,16 @@ class EnecsysSensor(Entity):
     @callback
     def _update_state(self, data):
         """Update the sensor state if the data is for this device."""
-        # Ensure we are updating the correct device
         if data["device_id"] != self._device_id:
             return
             
         new_value = data.get(self._data_key)
         
-        # Log that the sensor actually heard the update (Debug verification)
-        if self._data_key == "dc_power":
-             _LOGGER.debug("Sensor %s received update: %s", self._attr_name, new_value)
-
         if new_value is not None:
-            self._state = new_value
+            # Modern HA way: update the attribute directly
+            self._attr_native_value = new_value
             self.async_write_ha_state()
-
-    @property
-    def native_value(self):
-        return self._state
-
-    @property
-    def native_unit_of_measurement(self):
-        return self._unit
-
-    @property
-    def device_class(self):
-        return self._device_class
-        
-    @property
-    def state_class(self):
-        return SensorStateClass.MEASUREMENT
+            
+            # Log successful update for the first few times
+            if self._data_key == "dc_power":
+                _LOGGER.debug("Updated %s to %s", self._attr_unique_id, new_value)
