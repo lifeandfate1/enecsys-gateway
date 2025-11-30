@@ -22,7 +22,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         addr = writer.get_extra_info('peername')
         _LOGGER.info("New connection from %s", addr)
         
-        # Send initial Keep-Alive
         try:
             writer.write(KEEP_ALIVE_RESPONSE)
             await writer.drain()
@@ -39,14 +38,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 # Decode and clean buffer
                 message = data.decode('utf-8', errors='ignore').strip()
                 
-                # Split by \r to handle multiple packets
                 for line in message.split('\r'):
-                    # The Critical Fix: Look for WS= anywhere, not just at start
                     if "WS=" in line:
                         process_data(hass, line)
-                    elif "WZ=" in line:
-                        # Log Zigbee status just for confirmation
-                        _LOGGER.debug("Zigbee Status (WZ) packet received.")
 
         except Exception as e:
             _LOGGER.error("Connection error: %s", e)
@@ -56,48 +50,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     def process_data(hass, line):
         try:
-            # Clean up: "GarbageHeaderWS=Payload" -> "Payload"
-            # We take the part AFTER 'WS='
-            clean_payload = line.split("WS=")[1]
+            # 1. Extract Payload
+            # Format is usually GarbageHeaderWS=Payload
+            clean_payload = line.split("WS=")[1].strip()
             
-            # Sometimes there is junk at the end, or a Device ID. 
-            # We assume standard Base64 characters only.
-            # If there is an '=' at the end for padding, that's fine.
-            # If there is '=DeviceID', we handle that.
+            # 2. Handle "URL Safe" Base64 (The fix for your logs)
+            # Your logs showed characters like '-' which standard Base64 hates
+            clean_payload = clean_payload.replace('-', '+').replace('_', '/')
             
-            if "=" in clean_payload and len(clean_payload.split("=")) > 2:
-                 # Standard format: Payload=DeviceID
-                 b64_str = clean_payload.split("=")[0]
-                 device_id = clean_payload.split("=")[1]
-            else:
-                 # "Dirty" format: Just Payload. We must extract ID from binary.
-                 b64_str = clean_payload
-                 device_id = None
+            # 3. Handle Truncation (Remove explicit Device ID if present)
+            if "=" in clean_payload:
+                 clean_payload = clean_payload.split("=")[0]
 
-            # Base64 Decode
-            # We add padding just in case the string was truncated
-            b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
-            buf = base64.b64decode(b64_str)
+            # 4. Fix Padding (The fix for "Incorrect padding")
+            # Base64 length must be divisible by 4. Add '=' until it is.
+            padding_needed = len(clean_payload) % 4
+            if padding_needed:
+                clean_payload += "=" * (4 - padding_needed)
 
-            # --- ID EXTRACTION (The Fix) ---
-            if not device_id:
-                # In Gen 1 binary, the Device ID is often the first 4 bytes
-                # We convert it to Hex to make it readable (e.g., 200001...)
-                # Adjust this if your IDs look different on the sticker!
-                device_id = buf[0:4].hex().upper()
+            # 5. Decode
+            buf = base64.b64decode(clean_payload)
+            
+            # 6. Safety Check (The fix for "Index out of range")
+            # We need at least 40 bytes to read temperature at index 37
+            if len(buf) < 40:
+                # This is likely a fragmented packet or Zigbee noise. Skip it.
+                return
+
+            # --- ID EXTRACTION ---
+            # In Gen 1, ID is usually the first 4 bytes
+            device_id = buf[0:4].hex().upper()
 
             # --- DECODING LOGIC (Gen 1 Standard) ---
-            # DC Power (Watts) - Bytes 25-26
             dc_power = (buf[25] << 8) | buf[26]
-            
-            # Efficiency (0.001 scale) - Bytes 27-28
             efficiency = ((buf[27] << 8) | buf[28]) * 0.001
-            
-            # AC Volts - Bytes 31-32
             ac_volts = (buf[31] << 8) | buf[32]
-            
-            # Temperature (Celsius) - Byte 37
             temp_c = buf[37]
+
+            # Filter out crazy values (Encryption artifacts)
+            if dc_power > 500 or ac_volts > 300:
+                return
 
             payload = {
                 "device_id": device_id,
@@ -107,11 +99,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "temperature": temp_c
             }
             
-            _LOGGER.info("SUCCESS: Decoded Inverter %s | Power: %s W", device_id, dc_power)
+            _LOGGER.debug("Decoded %s: %s W", device_id, dc_power)
             async_dispatcher_send(hass, f"{DOMAIN}_update", payload)
             
         except Exception as e:
-            _LOGGER.error("Decode error: %s | Line: %s", e, line)
+            # Log as debug to avoid flooding logs with packet errors
+            _LOGGER.debug("Packet decode failed: %s", e)
 
     # Start Server
     try:
