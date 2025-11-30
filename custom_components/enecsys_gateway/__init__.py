@@ -35,7 +35,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if not data:
                     break
                 
-                # Decode and clean buffer
                 message = data.decode('utf-8', errors='ignore').strip()
                 
                 for line in message.split('\r'):
@@ -51,19 +50,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def process_data(hass, line):
         try:
             # 1. Extract Payload
-            # Format is usually GarbageHeaderWS=Payload
             clean_payload = line.split("WS=")[1].strip()
             
-            # 2. Handle "URL Safe" Base64 (The fix for your logs)
-            # Your logs showed characters like '-' which standard Base64 hates
+            # 2. Handle URL Safe Base64
             clean_payload = clean_payload.replace('-', '+').replace('_', '/')
             
-            # 3. Handle Truncation (Remove explicit Device ID if present)
+            # 3. Handle Truncation
             if "=" in clean_payload:
                  clean_payload = clean_payload.split("=")[0]
 
-            # 4. Fix Padding (The fix for "Incorrect padding")
-            # Base64 length must be divisible by 4. Add '=' until it is.
+            # 4. Fix Padding
             padding_needed = len(clean_payload) % 4
             if padding_needed:
                 clean_payload += "=" * (4 - padding_needed)
@@ -71,24 +67,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # 5. Decode
             buf = base64.b64decode(clean_payload)
             
-            # 6. Safety Check (The fix for "Index out of range")
-            # We need at least 40 bytes to read temperature at index 37
-            if len(buf) < 40:
-                # This is likely a fragmented packet or Zigbee noise. Skip it.
+            # 6. Safety Check
+            if len(buf) < 30:
                 return
 
-            # --- ID EXTRACTION ---
-            # In Gen 1, ID is usually the first 4 bytes
-            device_id = buf[0:4].hex().upper()
+            # --- ID EXTRACTION (LITTLE ENDIAN FIX) ---
+            # Data: 0F 9D 8F 06 -> ID: 068F9D0F
+            # We reverse the first 4 bytes ([::-1]) then convert to Hex
+            device_id = buf[0:4][::-1].hex().upper()
 
-            # --- DECODING LOGIC (Gen 1 Standard) ---
-            dc_power = (buf[25] << 8) | buf[26]
-            efficiency = ((buf[27] << 8) | buf[28]) * 0.001
-            ac_volts = (buf[31] << 8) | buf[32]
-            temp_c = buf[37]
+            # --- DECODING LOGIC (LITTLE ENDIAN + CORRECT OFFSETS) ---
+            # Based on bulldog5046/Enecsys-Zigbee-HA documentation
+            
+            # DC Power (Watts) - Bytes 24 (LSB) & 25 (MSB)
+            dc_power = buf[24] + (buf[25] << 8)
+            
+            # Efficiency (0.001 scale) - Bytes 26 (LSB) & 27 (MSB)
+            efficiency = (buf[26] + (buf[27] << 8)) * 0.001
+            
+            # AC Volts - Bytes 28 (LSB) & 29 (MSB)
+            ac_volts = buf[28] + (buf[29] << 8)
+            
+            # Temperature (Celsius) - Byte 37 (Optional)
+            temp_c = 0
+            if len(buf) > 37:
+                temp_c = buf[37]
 
-            # Filter out crazy values (Encryption artifacts)
-            if dc_power > 500 or ac_volts > 300:
+            # 7. Filter Garbage
+            # Enecsys gen 1 microinverters max out around 300W-400W. 
+            # If we get > 1000, the packet is likely Zigbee noise.
+            if dc_power > 1000: 
                 return
 
             payload = {
@@ -99,11 +107,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "temperature": temp_c
             }
             
-            _LOGGER.debug("Decoded %s: %s W", device_id, dc_power)
+            _LOGGER.info("Decoded %s | Power: %sW | Volts: %sV", device_id, dc_power, ac_volts)
             async_dispatcher_send(hass, f"{DOMAIN}_update", payload)
             
         except Exception as e:
-            # Log as debug to avoid flooding logs with packet errors
             _LOGGER.debug("Packet decode failed: %s", e)
 
     # Start Server
