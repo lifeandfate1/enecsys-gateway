@@ -28,7 +28,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             while True:
                 data = await reader.read(1024)
-                if not data: break
+                if not data:
+                    break
                 message = data.decode('utf-8', errors='ignore').strip()
                 for line in message.split('\r'):
                     if "WS=" in line:
@@ -46,8 +47,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if "=" in clean_payload:
                  clean_payload = clean_payload.split("=")[0]
             
-            # 2. Fix Padding (Corrected Logic)
-            # Only add padding if length is NOT divisible by 4
+            # 2. Fix Padding
             padding = (4 - len(clean_payload) % 4) % 4
             clean_payload += "=" * padding
 
@@ -71,15 +71,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             efficiency = (buf[26] + (buf[27] << 8)) * 0.001
             
             # AC Volts: Bytes 30-31 (Big Endian)
-            # Your logs show "00 EE" -> 238 Volts. "00 F0" -> 240 Volts.
             ac_volts = (buf[30] << 8) + buf[31]
             
             # Temperature: Byte 32 (Single Byte)
-            # Your logs show "15" -> 21C. "19" -> 25C.
             temp_c = buf[32]
 
             # 5. Sanity Filter (Adjusted for AU)
-            # If Volts is < 200 (too low) or > 270 (too high), ignore.
             if ac_volts < 150 or ac_volts > 300:
                 return
 
@@ -102,7 +99,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Enecsys Server listening on port %s", port)
         hass.data[DOMAIN][entry.entry_id] = server
         asyncio.create_task(server.serve_forever())
-    except OSError as err:
+    except OSError:
+        # Port likely in use
         return False
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
