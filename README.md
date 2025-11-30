@@ -57,15 +57,17 @@ To use this with the **Home Assistant Energy Dashboard**, you need to convert "P
 
 ### Step 1: Create a Helper
 1.  Go to **Settings** > **Devices & Services** > **Helpers**.
-2.  Click **+ Create Helper** and select **Integration - Riemann sum integral**.
-3.  Fill in the details:
+2.  Click **+ Create Helper**.
+3.  Search for and select **Integral sensor** (sometimes called Riemann sum integral).
+4.  Fill in the form exactly as follows:
     * **Name:** `Solar Lifetime Energy`
     * **Input Sensor:** `sensor.enecsys_total_system_power`
-    * **Integration Method:** `Left` (Recommended for solar spikes)
+    * **Integration Method:** Select **Left Riemann sum** (Best for solar spikes).
+    * **Metric prefix:** Select **kilo** (This ensures the result is **kWh**).
+    * **Time unit:** Select **Hours**.
     * **Precision:** `2`
-    * **Metric Prefix:** `kilo` (Result will be kWh)
-    * **Time unit:** `Hours`
-4.  Click **Submit**.
+    * **Max sub-interval:** Leave this blank or set to `0` (unless you have specific needs to handle long outages).
+5.  Click **Submit**.
 
 ### Step 2: Configure Dashboard
 1.  Go to **Settings** > **Dashboards** > **Energy**.
