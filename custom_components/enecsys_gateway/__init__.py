@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import base64
-import struct
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
