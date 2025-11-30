@@ -17,68 +17,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def handle_connection(reader, writer):
         addr = writer.get_extra_info('peername')
-        _LOGGER.info("New connection from %s", addr)
+        _LOGGER.debug("New connection from %s", addr)
         try:
             writer.write(KEEP_ALIVE_RESPONSE)
             await writer.drain()
         except Exception as e:
-            _LOGGER.error("Failed to send Keep-Alive: %s", e)
+            _LOGGER.debug("Failed to send Keep-Alive: %s", e)
             return
 
         try:
             while True:
                 data = await reader.read(1024)
-                if not data:
-                    break
+                if not data: break
                 message = data.decode('utf-8', errors='ignore').strip()
                 for line in message.split('\r'):
                     if "WS=" in line:
                         process_data(hass, line)
         except Exception as e:
-            _LOGGER.error("Connection error: %s", e)
+            _LOGGER.debug("Connection error: %s", e)
         finally:
             writer.close()
 
     def process_data(hass, line):
         try:
-            # 1. Clean Payload
             clean_payload = line.split("WS=")[1].strip()
             clean_payload = clean_payload.replace('-', '+').replace('_', '/')
             if "=" in clean_payload:
                  clean_payload = clean_payload.split("=")[0]
             
-            # 2. Fix Padding
             padding = (4 - len(clean_payload) % 4) % 4
             clean_payload += "=" * padding
 
-            # 3. Decode
             buf = base64.b64decode(clean_payload)
-            
-            # 4. Length Check (Packet must be at least 33 bytes for these offsets)
-            if len(buf) < 33:
-                return
+            if len(buf) < 33: return
 
-            # --- ID EXTRACTION ---
-            # Little Endian (Confirmed by your debug.htm)
+            # Verified Australian Logic
             device_id = buf[0:4][::-1].hex().upper()
-
-            # --- DECODING LOGIC (Verified for AU Data) ---
-            
-            # DC Power: Bytes 24-25 (Little Endian)
             dc_power = buf[24] + (buf[25] << 8)
-            
-            # Efficiency: Bytes 26-27 (Little Endian) -> Scale 0.001
             efficiency = (buf[26] + (buf[27] << 8)) * 0.001
-            
-            # AC Volts: Bytes 30-31 (Big Endian)
             ac_volts = (buf[30] << 8) + buf[31]
-            
-            # Temperature: Byte 32 (Single Byte)
             temp_c = buf[32]
 
-            # 5. Sanity Filter (Adjusted for AU)
-            if ac_volts < 150 or ac_volts > 300:
-                return
+            if ac_volts < 150 or ac_volts > 300: return
 
             payload = {
                 "device_id": device_id,
@@ -88,11 +68,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "temperature": temp_c
             }
             
-            _LOGGER.info("Decoded %s | Power: %sW | Volts: %sV | Temp: %sC", device_id, dc_power, ac_volts, temp_c)
+            # CHANGED TO DEBUG (SILENT)
+            _LOGGER.debug("Decoded %s | Power: %sW | Volts: %sV", device_id, dc_power, ac_volts)
             async_dispatcher_send(hass, f"{DOMAIN}_update", payload)
             
         except Exception as e:
-            _LOGGER.warning("Packet decode failed: %s", e)
+            _LOGGER.debug("Packet decode failed: %s", e)
 
     try:
         server = await asyncio.start_server(handle_connection, '0.0.0.0', port)
@@ -100,7 +81,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN][entry.entry_id] = server
         asyncio.create_task(server.serve_forever())
     except OSError:
-        # Port likely in use
         return False
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
