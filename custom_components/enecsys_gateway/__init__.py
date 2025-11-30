@@ -20,9 +20,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def handle_connection(reader, writer):
         addr = writer.get_extra_info('peername')
-        _LOGGER.debug("New connection from %s", addr)
+        _LOGGER.info("New connection from %s", addr)
         
-        # Send initial Keep-Alive to acknowledge connection
+        # Send initial Keep-Alive
         try:
             writer.write(KEEP_ALIVE_RESPONSE)
             await writer.drain()
@@ -39,20 +39,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     break
                 
                 # 2. Process data
+                # SPY MODE: Log exactly what we received before processing
                 message = data.decode('utf-8', errors='ignore').strip()
+                _LOGGER.warning("RAW DATA RECEIVED: %s", message)
+
                 for line in message.split('\r'):
-                    if line.startswith("WS="):
+                    if line.startswith("WS"):
                         process_data(hass, line)
-                        
-                        # OPTIONAL: Some gateways like a Keep-Alive after every valid data packet
-                        # Uncomment if connection drops frequently:
-                        # writer.write(KEEP_ALIVE_RESPONSE)
-                        # await writer.drain()
+                    # Handle Zigbee Status (WZ) just to acknowledge it's working
+                    elif line.startswith("WZ"):
+                         _LOGGER.info("Zigbee Status packet received (Ignored)")
+                    else:
+                         _LOGGER.debug("Unknown packet type: %s", line)
 
         except Exception as e:
             _LOGGER.error("Connection error: %s", e)
         finally:
-            _LOGGER.debug("Closing connection from %s", addr)
+            _LOGGER.info("Closing connection from %s", addr)
             writer.close()
 
     def process_data(hass, data_str):
@@ -66,19 +69,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             buf = base64.b64decode(b64_payload)
             
             # --- DECODING LOGIC (Gen 1 Standard) ---
-            # Based on community reverse engineering (Node-RED flow & e2pv)
-            # 18 bytes minimum usually expected
-            
-            # DC Power (Watts) - Bytes 25-26
             dc_power = (buf[25] << 8) | buf[26]
-            
-            # Efficiency (0.001 scale) - Bytes 27-28
             efficiency = ((buf[27] << 8) | buf[28]) * 0.001
-            
-            # AC Volts - Bytes 31-32
             ac_volts = (buf[31] << 8) | buf[32]
-            
-            # Temperature (Celsius) - Byte 37
             temp_c = buf[37]
 
             payload = {
@@ -88,6 +81,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "ac_voltage": ac_volts,
                 "temperature": temp_c
             }
+            # Log success so we know it worked
+            _LOGGER.info("Successfully decoded data for Inverter %s: %s W", device_id, dc_power)
             async_dispatcher_send(hass, f"{DOMAIN}_update", payload)
             
         except Exception as e:
@@ -111,7 +106,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
     if entry.entry_id in hass.data[DOMAIN]:
         server = hass.data[DOMAIN][entry.entry_id]
         server.close()
