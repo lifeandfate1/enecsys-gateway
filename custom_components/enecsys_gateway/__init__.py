@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import base64
+import struct
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -26,31 +27,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             writer.write(KEEP_ALIVE_RESPONSE)
             await writer.drain()
-            _LOGGER.debug("Sent initial Keep-Alive to %s", addr)
         except Exception as e:
             _LOGGER.error("Failed to send Keep-Alive: %s", e)
             return
 
         try:
             while True:
-                # 1. Read data
                 data = await reader.read(1024)
                 if not data:
                     break
                 
-                # 2. Process data
-                # SPY MODE: Log exactly what we received before processing
+                # Decode and clean buffer
                 message = data.decode('utf-8', errors='ignore').strip()
-                _LOGGER.warning("RAW DATA RECEIVED: %s", message)
-
+                
+                # Split by \r to handle multiple packets
                 for line in message.split('\r'):
-                    if line.startswith("WS"):
+                    # The Critical Fix: Look for WS= anywhere, not just at start
+                    if "WS=" in line:
                         process_data(hass, line)
-                    # Handle Zigbee Status (WZ) just to acknowledge it's working
-                    elif line.startswith("WZ"):
-                         _LOGGER.info("Zigbee Status packet received (Ignored)")
-                    else:
-                         _LOGGER.debug("Unknown packet type: %s", line)
+                    elif "WZ=" in line:
+                        # Log Zigbee status just for confirmation
+                        _LOGGER.debug("Zigbee Status (WZ) packet received.")
 
         except Exception as e:
             _LOGGER.error("Connection error: %s", e)
@@ -58,20 +55,49 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info("Closing connection from %s", addr)
             writer.close()
 
-    def process_data(hass, data_str):
+    def process_data(hass, line):
         try:
-            parts = data_str.split("=")
-            if len(parts) < 2:
-                return
-            b64_payload = parts[1]
-            device_id = parts[2] if len(parts) > 2 else "Unknown"
+            # Clean up: "GarbageHeaderWS=Payload" -> "Payload"
+            # We take the part AFTER 'WS='
+            clean_payload = line.split("WS=")[1]
             
-            buf = base64.b64decode(b64_payload)
+            # Sometimes there is junk at the end, or a Device ID. 
+            # We assume standard Base64 characters only.
+            # If there is an '=' at the end for padding, that's fine.
+            # If there is '=DeviceID', we handle that.
             
+            if "=" in clean_payload and len(clean_payload.split("=")) > 2:
+                 # Standard format: Payload=DeviceID
+                 b64_str = clean_payload.split("=")[0]
+                 device_id = clean_payload.split("=")[1]
+            else:
+                 # "Dirty" format: Just Payload. We must extract ID from binary.
+                 b64_str = clean_payload
+                 device_id = None
+
+            # Base64 Decode
+            # We add padding just in case the string was truncated
+            b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
+            buf = base64.b64decode(b64_str)
+
+            # --- ID EXTRACTION (The Fix) ---
+            if not device_id:
+                # In Gen 1 binary, the Device ID is often the first 4 bytes
+                # We convert it to Hex to make it readable (e.g., 200001...)
+                # Adjust this if your IDs look different on the sticker!
+                device_id = buf[0:4].hex().upper()
+
             # --- DECODING LOGIC (Gen 1 Standard) ---
+            # DC Power (Watts) - Bytes 25-26
             dc_power = (buf[25] << 8) | buf[26]
+            
+            # Efficiency (0.001 scale) - Bytes 27-28
             efficiency = ((buf[27] << 8) | buf[28]) * 0.001
+            
+            # AC Volts - Bytes 31-32
             ac_volts = (buf[31] << 8) | buf[32]
+            
+            # Temperature (Celsius) - Byte 37
             temp_c = buf[37]
 
             payload = {
@@ -81,12 +107,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "ac_voltage": ac_volts,
                 "temperature": temp_c
             }
-            # Log success so we know it worked
-            _LOGGER.info("Successfully decoded data for Inverter %s: %s W", device_id, dc_power)
+            
+            _LOGGER.info("SUCCESS: Decoded Inverter %s | Power: %s W", device_id, dc_power)
             async_dispatcher_send(hass, f"{DOMAIN}_update", payload)
             
         except Exception as e:
-            _LOGGER.error("Decode error: %s | Raw: %s", e, data_str)
+            _LOGGER.error("Decode error: %s | Line: %s", e, line)
 
     # Start Server
     try:
