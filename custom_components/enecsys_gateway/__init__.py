@@ -28,7 +28,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             while True:
                 data = await reader.read(1024)
-                if not data: break
+                if not data:
+                    break
                 message = data.decode('utf-8', errors='ignore').strip()
                 for line in message.split('\r'):
                     if "WS=" in line:
@@ -49,7 +50,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             clean_payload += "=" * padding
 
             buf = base64.b64decode(clean_payload)
-            if len(buf) < 33: return
+            if len(buf) < 33:
+                return
 
             # Verified Australian Logic
             device_id = buf[0:4][::-1].hex().upper()
@@ -58,7 +60,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ac_volts = (buf[30] << 8) + buf[31]
             temp_c = buf[32]
 
-            if ac_volts < 150 or ac_volts > 300: return
+            if ac_volts < 150 or ac_volts > 300:
+                return
 
             payload = {
                 "device_id": device_id,
