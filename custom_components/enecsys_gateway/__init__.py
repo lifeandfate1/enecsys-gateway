@@ -40,56 +40,62 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     def process_data(hass, line):
         try:
+            # 1. Clean Payload
             clean_payload = line.split("WS=")[1].strip()
             clean_payload = clean_payload.replace('-', '+').replace('_', '/')
             if "=" in clean_payload:
                  clean_payload = clean_payload.split("=")[0]
             
-            padding_needed = len(clean_payload) % 4
-            if padding_needed:
-                clean_payload += "=" * (4 - padding_needed)
+            # 2. Fix Padding (Corrected Logic)
+            # Only add padding if length is NOT divisible by 4
+            padding = (4 - len(clean_payload) % 4) % 4
+            clean_payload += "=" * padding
 
+            # 3. Decode
             buf = base64.b64decode(clean_payload)
             
-            # Diagnostic: Log buffer length
-            if len(buf) < 32:
-                _LOGGER.debug("Buffer too short: %s", len(buf))
+            # 4. Length Check (Packet must be at least 33 bytes for these offsets)
+            if len(buf) < 33:
                 return
 
             # --- ID EXTRACTION ---
-            # Reversing ID based on your debug.htm confirmation
+            # Little Endian (Confirmed by your debug.htm)
             device_id = buf[0:4][::-1].hex().upper()
 
-            # --- DIAGNOSTIC DECODING ---
-            # We are trying Bytes 24/25 for Power
+            # --- DECODING LOGIC (Verified for AU Data) ---
+            
+            # DC Power: Bytes 24-25 (Little Endian)
             dc_power = buf[24] + (buf[25] << 8)
             
-            # We are trying Bytes 30/31 for Volts (Your logs suggest 28/29 was wrong)
-            # In your log: ... 32 32 00 EE ... 
-            # 00 EE (Little Endian) = 238 Volts. This looks correct.
-            ac_volts = buf[30] + (buf[31] << 8)
+            # Efficiency: Bytes 26-27 (Little Endian) -> Scale 0.001
+            efficiency = (buf[26] + (buf[27] << 8)) * 0.001
             
-            # Temperature
-            temp_c = 0
-            if len(buf) > 37:
-                temp_c = buf[37]
+            # AC Volts: Bytes 30-31 (Big Endian)
+            # Your logs show "00 EE" -> 238 Volts. "00 F0" -> 240 Volts.
+            ac_volts = (buf[30] << 8) + buf[31]
+            
+            # Temperature: Byte 32 (Single Byte)
+            # Your logs show "15" -> 21C. "19" -> 25C.
+            temp_c = buf[32]
+
+            # 5. Sanity Filter (Adjusted for AU)
+            # If Volts is < 200 (too low) or > 270 (too high), ignore.
+            if ac_volts < 150 or ac_volts > 300:
+                return
 
             payload = {
                 "device_id": device_id,
                 "dc_power": dc_power,
-                "efficiency": 0, # Ignored for now
+                "efficiency": efficiency,
                 "ac_voltage": ac_volts,
                 "temperature": temp_c
             }
             
-            # FORCE LOGGING: Print the values so we can see what's happening
-            _LOGGER.warning("INVERTER %s -> Power: %s W | Volts: %s V | Temp: %s C", device_id, dc_power, ac_volts, temp_c)
-            
-            # SEND UPDATE: No safety filter. Just send it.
+            _LOGGER.info("Decoded %s | Power: %sW | Volts: %sV | Temp: %sC", device_id, dc_power, ac_volts, temp_c)
             async_dispatcher_send(hass, f"{DOMAIN}_update", payload)
             
         except Exception as e:
-            _LOGGER.error("Decode fail: %s", e)
+            _LOGGER.warning("Packet decode failed: %s", e)
 
     try:
         server = await asyncio.start_server(handle_connection, '0.0.0.0', port)
